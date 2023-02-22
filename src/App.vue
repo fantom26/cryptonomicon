@@ -1,52 +1,69 @@
 <template>
   <div class="container mx-auto flex flex-col items-center bg-gray-100 p-4">
+    <div
+      v-if="loading"
+      class="fixed w-100 h-100 opacity-80 bg-purple-800 inset-0 z-50 flex items-center justify-center"
+    >
+      <svg
+        class="animate-spin -ml-1 mr-3 h-12 w-12 text-white"
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <circle
+          class="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          stroke-width="4"
+        ></circle>
+        <path
+          class="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+        ></path>
+      </svg>
+    </div>
     <div class="container">
       <section>
         <div class="flex">
           <div class="max-w-xs">
             <label for="wallet" class="block text-sm font-medium text-gray-700"
-              >Тикер</label
+              >Ticker</label
             >
             <div class="mt-1 relative rounded-md shadow-md">
               <input
                 v-model="ticker"
                 type="text"
-                @keydown.enter="add(ticker)"
+                @keyup="makeAutocomplete(ticker)"
+                @blur="onBlurInput"
                 name="wallet"
                 id="wallet"
                 class="block w-full pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
-                placeholder="Например DOGE"
+                placeholder="DOGE"
               />
             </div>
-            <!-- <div
-              class="flex bg-white shadow-md p-1 rounded-md shadow-md flex-wrap"
+            <div
+              v-if="autocomplete.length"
+              class="flex bg-white shadow-md p-1 rounded-md flex-wrap"
             >
               <span
+                v-for="(coin, idx) in autocomplete"
+                :key="coin?.Id || idx"
+                @click="add(coin.Symbol)"
                 class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
               >
-                BTC
+                {{ coin.Symbol }}
               </span>
-              <span
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                DOGE
-              </span>
-              <span
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                BCH
-              </span>
-              <span
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                CHD
-              </span>
-            </div> -->
-            <!-- <div class="text-sm text-red-600">Такой тикер уже добавлен</div> -->
+            </div>
+            <div v-if="tickerWarning" class="text-sm text-red-600 mt-1">
+              This ticker already added
+            </div>
           </div>
         </div>
         <button
-          @click="add"
+          @click="add(ticker)"
           type="button"
           class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
         >
@@ -63,7 +80,7 @@
               d="M13 7h-2v4H7v2h4v4h2v-4h4v-2h-4V7zm-1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
             ></path>
           </svg>
-          Добавить
+          Add
         </button>
       </section>
 
@@ -118,7 +135,7 @@
           <div
             v-for="(bar, idx) in normalizeGraph()"
             :key="idx"
-            :style="{ height: bar }"
+            :style="{ height: `${bar}%` }"
             class="bg-purple-800 border w-10"
           ></div>
         </div>
@@ -163,15 +180,45 @@ export default {
       tickers: [],
       sel: null,
       graph: [],
+      loading: false,
+      coinlist: {},
+      autocomplete: [],
+      tickerWarning: false,
     };
   },
 
+  async mounted() {
+    try {
+      this.loading = true;
+      const response = await fetch(
+        "https://min-api.cryptocompare.com/data/all/coinlist?summary=true"
+      );
+      const data = await response.json();
+
+      this.coinlist = data.Data;
+    } catch (error) {
+      console.log("error: ", error);
+    } finally {
+      this.loading = false;
+    }
+  },
+
   methods: {
-    add() {
-      if (this.ticker) {
-        const currentTicker = { name: this.ticker.toUpperCase(), price: "-" };
+    add(tickerName) {
+      if (tickerName) {
+        if (
+          this.tickers.find(
+            (ticker) => ticker.name.toLowerCase() === tickerName.toLowerCase()
+          )
+        ) {
+          this.tickerWarning = true;
+          return;
+        }
+
+        const currentTicker = { name: tickerName.toUpperCase(), price: "-" };
 
         this.tickers.push(currentTicker);
+
         setInterval(async () => {
           const response = await fetch(
             `https://min-api.cryptocompare.com/data/price?fsym=${currentTicker.name}&tsyms=USD`
@@ -188,8 +235,28 @@ export default {
             this.graph.push(data.USD);
           }
         }, 5000);
+
         this.ticker = "";
+        this.autocomplete = [];
+        this.tickerWarning = false;
       }
+    },
+
+    onBlurInput() {
+      if (!this.ticker) this.autocomplete = [];
+    },
+
+    makeAutocomplete(ticker) {
+      this.tickerWarning = false;
+
+      const filteredList = Object.values(this.coinlist).filter(
+        (coin) =>
+          coin.FullName.toLowerCase().match(ticker.toLowerCase()) ||
+          coin.Symbol.toLowerCase().match(ticker.toLowerCase())
+      );
+      const [first, second, third, fourth] = filteredList;
+
+      this.autocomplete = [first, second, third, fourth].filter((coin) => coin);
     },
 
     removeTicker(removedTicker) {
