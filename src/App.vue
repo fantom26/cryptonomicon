@@ -36,8 +36,8 @@
               <input
                 v-model="ticker"
                 type="text"
-                @keyup="makeAutocomplete(ticker)"
                 @blur="onBlurInput"
+                @keydown.enter="add"
                 name="wallet"
                 id="wallet"
                 class="block w-full pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
@@ -45,24 +45,27 @@
               />
             </div>
             <div
-              v-if="autocomplete.length"
+              v-if="autocompletedList.length"
               class="flex bg-white shadow-md p-1 rounded-md flex-wrap"
             >
               <span
-                v-for="(coin, idx) in autocomplete"
+                v-for="(coin, idx) in autocompletedList"
                 :key="coin?.Id || idx"
-                @click="add(coin.Symbol)"
+                @click="selectFromAutoComplete(coin.Symbol)"
                 class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
               >
                 {{ coin.Symbol }}
               </span>
             </div>
-            <div v-if="tickerWarning" class="text-sm text-red-600 mt-1">
+            <div
+              v-if="tickersContainNewTicker"
+              class="text-sm text-red-600 mt-1"
+            >
               This ticker already added
             </div>
           </div>
           <button
-            @click="add(ticker)"
+            @click="add"
             type="button"
             class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
           >
@@ -123,10 +126,10 @@
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
             :class="{
-              'border-4': sel === t,
+              'border-4': selectedTicker === t,
             }"
             class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
-            v-for="t in filterTickers()"
+            v-for="t in paginatedTickers"
             :key="t.name"
             @click="select(t)"
           >
@@ -159,22 +162,28 @@
             </button>
           </div>
         </dl>
+        <div
+          v-if="filteredTickers.length === 0"
+          class="w-full text-3xl text-center text-red-800"
+        >
+          Unfortunately, we don't have currencies with that filter
+        </div>
         <hr class="w-full border-t border-gray-600 my-4" />
       </template>
-      <section v-if="sel" class="relative">
+      <section v-if="selectedTicker" class="relative">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
-          {{ sel.name }} - USD
+          {{ selectedTicker.name }} - USD
         </h3>
         <div class="flex items-end border-gray-600 border-b border-l h-64">
           <div
-            v-for="(bar, idx) in normalizeGraph()"
+            v-for="(bar, idx) in normalizedGraph"
             :key="idx"
             :style="{ height: `${bar}%` }"
             class="bg-purple-800 border w-10"
           ></div>
         </div>
         <button
-          @click="sel = null"
+          @click="selectedTicker = null"
           type="button"
           class="absolute top-0 right-0"
         >
@@ -214,17 +223,14 @@ export default {
       filter: "",
 
       tickers: [],
-      sel: null,
+      selectedTicker: null,
 
       graph: [],
 
       loading: false,
       coinlist: {},
-      autocomplete: [],
-      tickerWarning: false,
 
       page: 1,
-      hasNextPage: true,
     };
   },
 
@@ -235,13 +241,13 @@ export default {
       new URL(document.location).searchParams.entries()
     );
 
-    if (urlData.filter) {
-      this.filter = urlData.filter;
-    }
+    const VALID_KEYS = ["filter", "page"];
 
-    if (urlData.page) {
-      this.page = urlData.page;
-    }
+    VALID_KEYS.forEach((key) => {
+      if (urlData[key]) {
+        this[key] = urlData[key];
+      }
+    });
 
     if (localStorageData) {
       this.tickers = JSON.parse(localStorageData);
@@ -268,6 +274,72 @@ export default {
     }
   },
 
+  computed: {
+    startIndex() {
+      return (this.page - 1) * 6;
+    },
+
+    endIndex() {
+      return this.page * 6;
+    },
+
+    filteredTickers() {
+      return this.tickers.filter((ticker) =>
+        ticker.name.includes(this.filter.toUpperCase())
+      );
+    },
+
+    paginatedTickers() {
+      return this.filteredTickers.slice(this.startIndex, this.endIndex);
+    },
+
+    hasNextPage() {
+      return this.filteredTickers.length > this.endIndex;
+    },
+
+    pageStateOptions() {
+      return {
+        filter: this.filter,
+        page: this.page,
+      };
+    },
+
+    filteredCoinList() {
+      if (!this.ticker) return [];
+
+      return Object.values(this.coinlist).filter(
+        (coin) =>
+          coin.FullName.toLowerCase().match(this.ticker.toLowerCase()) ||
+          coin.Symbol.toLowerCase().match(this.ticker.toLowerCase())
+      );
+    },
+
+    autocompletedList() {
+      const [first, second, third, fourth] = this.filteredCoinList;
+
+      return [first, second, third, fourth].filter((coin) => coin);
+    },
+
+    tickersContainNewTicker() {
+      return this.tickers.find(
+        (ticker) => ticker.name.toLowerCase() === this.ticker.toLowerCase()
+      );
+    },
+
+    normalizedGraph() {
+      const maxValue = Math.max(...this.graph);
+      const minValue = Math.min(...this.graph);
+
+      if (maxValue === minValue) {
+        return this.graph.map(() => 50);
+      }
+
+      return this.graph.map(
+        (price) => 5 + ((price - minValue) * 95) / (maxValue - minValue)
+      );
+    },
+  },
+
   methods: {
     subscribeToUpdates(tickerName) {
       setInterval(async () => {
@@ -280,113 +352,73 @@ export default {
         this.tickers.find((ticker) => ticker.name === tickerName).price =
           data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
 
-        if (this.sel?.name === tickerName) {
+        if (this.selectedTicker?.name === tickerName) {
           this.graph.push(data.USD);
         }
       }, 5000);
     },
 
-    add(tickerName) {
-      if (tickerName) {
-        if (
-          this.tickers.find(
-            (ticker) => ticker.name.toLowerCase() === tickerName.toLowerCase()
-          )
-        ) {
-          this.tickerWarning = true;
-          return;
-        }
+    add() {
+      if (!this.tickersContainNewTicker) {
+        const currentTicker = { name: this.ticker.toUpperCase(), price: "-" };
 
-        const currentTicker = { name: tickerName.toUpperCase(), price: "-" };
-
-        this.tickers.push(currentTicker);
+        this.tickers = [...this.tickers, currentTicker];
         this.filter = "";
-
-        localStorage.setItem(
-          "cryptonomicon-list",
-          JSON.stringify(this.tickers)
-        );
+        this.ticker = "";
 
         this.subscribeToUpdates(currentTicker.name);
-
-        this.ticker = "";
-        this.autocomplete = [];
-        this.tickerWarning = false;
       }
+    },
+
+    selectFromAutoComplete(symbol) {
+      this.ticker = symbol;
+
+      this.add();
     },
 
     onBlurInput() {
       if (!this.ticker) this.autocomplete = [];
     },
 
-    makeAutocomplete(ticker) {
-      this.tickerWarning = false;
-
-      const filteredList = Object.values(this.coinlist).filter(
-        (coin) =>
-          coin.FullName.toLowerCase().match(ticker.toLowerCase()) ||
-          coin.Symbol.toLowerCase().match(ticker.toLowerCase())
-      );
-      const [first, second, third, fourth] = filteredList;
-
-      this.autocomplete = [first, second, third, fourth].filter((coin) => coin);
-    },
-
-    filterTickers() {
-      const start = (this.page - 1) * 6;
-      const end = this.page * 6;
-
-      const filteredTickers = this.tickers.filter((ticker) =>
-        ticker.name.includes(this.filter.toUpperCase())
-      );
-
-      this.hasNextPage = filteredTickers.length > end;
-
-      return filteredTickers.slice(start, end);
-    },
-
     removeTicker(removedTicker) {
       this.tickers = this.tickers.filter((t) => t !== removedTicker);
 
-      if (removedTicker === this.sel) {
-        this.sel = null;
+      if (removedTicker === this.selectedTicker) {
+        this.selectedTicker = null;
       }
     },
 
     select(ticker) {
-      this.sel = ticker;
-      this.graph = [];
-    },
-
-    normalizeGraph() {
-      const maxValue = Math.max(...this.graph);
-      const minValue = Math.min(...this.graph);
-
-      return this.graph.map(
-        (price) => 5 + ((price - minValue) * 95) / (maxValue - minValue)
-      );
+      this.selectedTicker = ticker;
     },
   },
 
   watch: {
+    selectedTicker() {
+      this.graph = [];
+    },
+
+    tickers() {
+      localStorage.setItem("cryptonomicon-list", JSON.stringify(this.tickers));
+    },
+
+    paginatedTickers() {
+      if (this.paginatedTickers.length === 0 && this.page > 1) {
+        this.page -= 1;
+      }
+    },
+
     filter() {
       this.page = 1;
-
-      window.history.pushState(
-        null,
-        document.title,
-        `${window.location.pathname}${
-          this.filter ? `?filter=${this.filter}` : ""
-        }${this.filter ? "&" : "?"}page=${this.page}`
-      );
     },
-    page() {
+
+    pageStateOptions(value) {
       window.history.pushState(
         null,
         document.title,
         `${window.location.pathname}${
-          this.filter ? `?filter=${this.filter}` : ""
-        }${this.filter ? "&" : "?"}page=${this.page}`
+          value.filter ? `?filter=${value.filter}` : ""
+        }${value.filter ? "&" : "?"}page=${value.page}`
       );
     },
   },
