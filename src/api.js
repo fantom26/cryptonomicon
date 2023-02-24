@@ -12,8 +12,22 @@ socket.addEventListener("message", (e) => {
   const {
     TYPE: type,
     FROMSYMBOL: currency,
+    MESSAGE: message,
+    PARAMETER: parameter,
     PRICE: newPrice,
   } = JSON.parse(e.data);
+
+  if (message === "INVALID_SUB") {
+    const [toCurrency, fromCurrency] = parameter.split("~").reverse();
+    console.log("toCurrency", toCurrency);
+    console.log("fromCurrency", fromCurrency);
+
+    if (toCurrency !== "BTC") {
+      const [firstCb] = tickersHandlers.get(fromCurrency);
+      subscribeToTicker(fromCurrency, firstCb, false);
+    }
+  }
+
   if (type !== AGGREGATE_INDEX || newPrice === undefined) {
     return;
   }
@@ -39,27 +53,27 @@ function sendToWebSocket(message) {
   );
 }
 
-function subscribeToTickerOnWs(ticker) {
+function subscribeToTickerOnWs(ticker, toUSD) {
   sendToWebSocket({
     action: "SubAdd",
-    subs: [`5~CCCAGG~${ticker}~USD`],
+    subs: [`5~CCCAGG~${ticker}~${toUSD ? "USD" : "BTC"}`],
   });
 }
 
-function unsubscribeFromTickerOnWs(ticker) {
+function unsubscribeFromTickerOnWs(ticker, toUSD) {
   sendToWebSocket({
     action: "SubRemove",
-    subs: [`5~CCCAGG~${ticker}~USD`],
+    subs: [`5~CCCAGG~${ticker}~${toUSD ? "USD" : "BTC"}`],
   });
 }
 
-export const subscribeToTicker = (ticker, cb) => {
+export const subscribeToTicker = (ticker, cb, toUSD = true) => {
   const subscribers = tickersHandlers.get(ticker) || [];
   tickersHandlers.set(ticker, [...subscribers, cb]);
-  subscribeToTickerOnWs(ticker);
+  subscribeToTickerOnWs(ticker, toUSD);
 };
 
-export const unsubscribeFromTicker = (ticker) => {
+export const unsubscribeFromTicker = (ticker, toUSD = true) => {
   tickersHandlers.delete(ticker);
-  unsubscribeFromTickerOnWs(ticker);
+  unsubscribeFromTickerOnWs(ticker, toUSD);
 };

@@ -121,14 +121,17 @@
         </div>
       </section>
 
+      {{ tickers }}
       <template v-if="tickers.length > 0">
         <hr class="w-full border-t border-gray-600 my-4" />
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
             :class="{
               'border-4': selectedTicker === t,
+              'bg-red-400': !+t.price,
+              'bg-white': +t.price,
             }"
-            class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
+            class="overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
             v-for="t in paginatedTickers"
             :key="t.name"
             @click="select(t)"
@@ -256,7 +259,7 @@ export default {
 
       this.tickers.forEach((ticker) => {
         subscribeToTicker(ticker.name, (newPrice) =>
-          this.updateTicker(ticker.name, newPrice)
+          this.updateTickers(ticker.name, newPrice)
         );
       });
     }
@@ -353,7 +356,7 @@ export default {
       return price > 1 ? price.toFixed(2) : price.toPrecision(2);
     },
 
-    updateTicker(tickerName, price) {
+    updateTickers(tickerName, price) {
       this.tickers
         .filter((t) => t.name === tickerName)
         .forEach((t) => {
@@ -373,7 +376,7 @@ export default {
         this.ticker = "";
 
         subscribeToTicker(currentTicker.name, (newPrice) =>
-          this.updateTicker(currentTicker.name, newPrice)
+          this.updateTickers(currentTicker.name, newPrice)
         );
       }
     },
