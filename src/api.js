@@ -1,7 +1,7 @@
 const API_KEY =
   "2bc6306864ca02a96fe2769ee26b09ec3e62daa99b0dbd77e65d52587d933dbc";
 
-const tickersHandlers = new Map();
+const tickersInfo = new Map();
 const socket = new WebSocket(
   `wss://streamer.cryptocompare.com/v2?api_key=${API_KEY}`
 );
@@ -11,20 +11,33 @@ const AGGREGATE_INDEX = "5";
 socket.addEventListener("message", (e) => {
   const {
     TYPE: type,
-    FROMSYMBOL: currency,
+    FROMSYMBOL: fromCurrency,
+    // TOSYMBOL: toCurrency,
     MESSAGE: message,
     PARAMETER: parameter,
     PRICE: newPrice,
   } = JSON.parse(e.data);
 
+  console.log(tickersInfo);
+
   if (message === "INVALID_SUB") {
     const [toCurrency, fromCurrency] = parameter.split("~").reverse();
-    console.log("toCurrency", toCurrency);
-    console.log("fromCurrency", fromCurrency);
 
     if (toCurrency !== "BTC") {
-      const [firstCb] = tickersHandlers.get(fromCurrency);
+      const [firstCb] = tickersInfo.get(fromCurrency).handlers;
       subscribeToTicker(fromCurrency, firstCb, false);
+    }
+  }
+
+  if (fromCurrency === "BTC") {
+    const tickersDependOnBTC = Object.fromEntries(
+      Object.entries(tickersInfo).filter((ticker) => !ticker[1].toBTC) // [1] = value in [key, value]
+    );
+
+    for (const tickerName in tickersDependOnBTC) {
+      const currencyInfo = tickersInfo.get(tickerName) ?? [];
+      currencyInfo.price *= newPrice; // newPrice = BTC price
+      currencyInfo.handlers.forEach((fn) => fn(currencyInfo.price));
     }
   }
 
@@ -32,8 +45,9 @@ socket.addEventListener("message", (e) => {
     return;
   }
 
-  const handlers = tickersHandlers.get(currency) ?? [];
-  handlers.forEach((fn) => fn(newPrice));
+  const currencyInfo = tickersInfo.get(fromCurrency) ?? [];
+  currencyInfo.price = newPrice;
+  currencyInfo.handlers.forEach((fn) => fn(newPrice));
 });
 
 function sendToWebSocket(message) {
@@ -68,12 +82,16 @@ function unsubscribeFromTickerOnWs(ticker, toUSD) {
 }
 
 export const subscribeToTicker = (ticker, cb, toUSD = true) => {
-  const subscribers = tickersHandlers.get(ticker) || [];
-  tickersHandlers.set(ticker, [...subscribers, cb]);
+  const subscribers = tickersInfo.get(ticker)?.handlers || [];
+  tickersInfo.set(ticker, {
+    price: null,
+    toBTC: !toUSD,
+    handlers: [...subscribers, cb],
+  });
   subscribeToTickerOnWs(ticker, toUSD);
 };
 
 export const unsubscribeFromTicker = (ticker, toUSD = true) => {
-  tickersHandlers.delete(ticker);
+  tickersInfo.delete(ticker);
   unsubscribeFromTickerOnWs(ticker, toUSD);
 };
