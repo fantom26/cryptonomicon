@@ -218,7 +218,7 @@
 </template>
 
 <script>
-import { subscribeToTicker, unsubscribeFromTicker } from "./api";
+import { subscribeToTicker, unsubscribeFromTicker, tickersInfo } from "./api";
 
 export default {
   name: "App",
@@ -258,9 +258,15 @@ export default {
       this.tickers = JSON.parse(localStorageData);
 
       this.tickers.forEach((ticker) => {
-        subscribeToTicker(ticker.name, (newPrice) =>
-          this.updateTickers(ticker.name, newPrice)
-        );
+        subscribeToTicker(ticker.name, (dependOnBTC, newPrice) => {
+          this.updateTickers(ticker.name, dependOnBTC, newPrice);
+
+          if (!tickersInfo.has("BTC")) {
+            subscribeToTicker("BTC", (dependOnBTC, newPrice) => {
+              this.updateTickers("BTC", dependOnBTC, newPrice);
+            });
+          }
+        });
       });
     }
 
@@ -356,27 +362,32 @@ export default {
       return price > 1 ? price.toFixed(2) : price.toPrecision(2);
     },
 
-    updateTickers(tickerName, price) {
+    updateTickers(tickerName, dependOnBTC, price) {
       this.tickers
         .filter((t) => t.name === tickerName)
         .forEach((t) => {
           if (t === this.selectedTicker) {
             this.graph.push(price);
           }
+          t.dependOnBTC = dependOnBTC;
           t.price = price;
         });
     },
 
     add() {
       if (!this.tickersContainNewTicker) {
-        const currentTicker = { name: this.ticker.toUpperCase(), price: "-" };
+        const currentTicker = {
+          name: this.ticker.toUpperCase(),
+          price: "-",
+          dependOnBTC: true,
+        };
 
         this.tickers = [...this.tickers, currentTicker];
         this.filter = "";
         this.ticker = "";
 
-        subscribeToTicker(currentTicker.name, (newPrice) =>
-          this.updateTickers(currentTicker.name, newPrice)
+        subscribeToTicker(currentTicker.name, (dependOnBTC, newPrice) =>
+          this.updateTickers(currentTicker.name, dependOnBTC, newPrice)
         );
       }
     },

@@ -1,7 +1,7 @@
 const API_KEY =
   "2bc6306864ca02a96fe2769ee26b09ec3e62daa99b0dbd77e65d52587d933dbc";
 
-const tickersInfo = new Map();
+export const tickersInfo = new Map();
 const socket = new WebSocket(
   `wss://streamer.cryptocompare.com/v2?api_key=${API_KEY}`
 );
@@ -12,13 +12,11 @@ socket.addEventListener("message", (e) => {
   const {
     TYPE: type,
     FROMSYMBOL: fromCurrency,
-    // TOSYMBOL: toCurrency,
+    TOSYMBOL: toCurrency,
     MESSAGE: message,
     PARAMETER: parameter,
     PRICE: newPrice,
   } = JSON.parse(e.data);
-
-  console.log(tickersInfo);
 
   if (message === "INVALID_SUB") {
     const [toCurrency, fromCurrency] = parameter.split("~").reverse();
@@ -31,14 +29,18 @@ socket.addEventListener("message", (e) => {
 
   if (fromCurrency === "BTC") {
     const tickersDependOnBTC = Object.fromEntries(
-      Object.entries(tickersInfo).filter((ticker) => !ticker[1].toBTC) // [1] = value in [key, value]
+      Array.from(tickersInfo.entries()).filter((ticker) => ticker[1].toBTC)
     );
 
     for (const tickerName in tickersDependOnBTC) {
       const currencyInfo = tickersInfo.get(tickerName) ?? [];
-      currencyInfo.price *= newPrice; // newPrice = BTC price
-      currencyInfo.handlers.forEach((fn) => fn(currencyInfo.price));
+      currencyInfo.priceToUSD = currencyInfo.priceToBTC * newPrice; // newPrice = BTC price
+      currencyInfo.handlers.forEach((fn) =>
+        fn(toCurrency === "BTC", currencyInfo.priceToUSD)
+      );
     }
+
+    return;
   }
 
   if (type !== AGGREGATE_INDEX || newPrice === undefined) {
@@ -46,8 +48,18 @@ socket.addEventListener("message", (e) => {
   }
 
   const currencyInfo = tickersInfo.get(fromCurrency) ?? [];
-  currencyInfo.price = newPrice;
-  currencyInfo.handlers.forEach((fn) => fn(newPrice));
+
+  if (toCurrency === "USD") {
+    currencyInfo.priceToUSD = newPrice;
+  } else {
+    currencyInfo.priceToBTC = newPrice;
+
+    if (currencyInfo.toBTC && tickersInfo.has("BTC")) {
+      currencyInfo.priceToUSD =
+        currencyInfo.priceToBTC * tickersInfo.get("BTC").priceToUSD;
+    }
+  }
+  currencyInfo.handlers.forEach((fn) => fn(toCurrency === "BTC", newPrice));
 });
 
 function sendToWebSocket(message) {
@@ -83,11 +95,15 @@ function unsubscribeFromTickerOnWs(ticker, toUSD) {
 
 export const subscribeToTicker = (ticker, cb, toUSD = true) => {
   const subscribers = tickersInfo.get(ticker)?.handlers || [];
-  tickersInfo.set(ticker, {
-    price: null,
+
+  const tickerInfo = {
+    priceToUSD: null,
+    priceToBTC: null,
     toBTC: !toUSD,
     handlers: [...subscribers, cb],
-  });
+  };
+
+  tickersInfo.set(ticker, tickerInfo);
   subscribeToTickerOnWs(ticker, toUSD);
 };
 
