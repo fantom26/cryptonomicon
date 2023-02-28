@@ -218,7 +218,12 @@
 </template>
 
 <script>
-import { subscribeToTicker, unsubscribeFromTicker, tickersInfo } from "./api";
+import {
+  subscribeToTicker,
+  unsubscribeFromTicker,
+  getCoinlist,
+  tickersInfo,
+} from "./api";
 
 export default {
   name: "App",
@@ -276,10 +281,8 @@ export default {
   async mounted() {
     try {
       this.loading = true;
-      const response = await fetch(
-        "https://min-api.cryptocompare.com/data/all/coinlist?summary=true"
-      );
-      const data = await response.json();
+
+      const data = await getCoinlist();
 
       this.coinlist = data.Data;
     } catch (error) {
@@ -375,21 +378,25 @@ export default {
     },
 
     add() {
-      if (!this.tickersContainNewTicker) {
-        const currentTicker = {
-          name: this.ticker.toUpperCase(),
-          price: "-",
-          dependOnBTC: true,
-        };
+      if (this.tickersContainNewTicker) return;
 
-        this.tickers = [...this.tickers, currentTicker];
-        this.filter = "";
-        this.ticker = "";
+      const currentTicker = {
+        name: this.ticker.toUpperCase(),
+        price: "-",
+        dependOnBTC: true,
+      };
 
-        subscribeToTicker(currentTicker.name, (dependOnBTC, newPrice) =>
-          this.updateTickers(currentTicker.name, dependOnBTC, newPrice)
-        );
+      this.tickers = [...this.tickers, currentTicker];
+      this.filter = "";
+      this.ticker = "";
+
+      if (currentTicker.name === "BTC" && tickersInfo.get("BTC")) {
+        unsubscribeFromTicker(currentTicker.name);
       }
+
+      subscribeToTicker(currentTicker.name, (dependOnBTC, newPrice) =>
+        this.updateTickers(currentTicker.name, dependOnBTC, newPrice)
+      );
     },
 
     selectFromAutoComplete(symbol) {
