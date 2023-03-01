@@ -27,64 +27,7 @@
     </div>
     <div class="container">
       <section class="flex justify-between gap-3 flex-col sm:flex-row">
-        <div>
-          <div class="max-w-xs">
-            <label for="wallet" class="block text-sm font-medium text-gray-700"
-              >Ticker</label
-            >
-            <div class="mt-1 relative rounded-md shadow-md">
-              <input
-                v-model="ticker"
-                type="text"
-                @blur="onBlurInput"
-                @keydown.enter="add"
-                name="wallet"
-                id="wallet"
-                class="block w-full pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
-                placeholder="DOGE"
-              />
-            </div>
-            <div
-              v-if="autocompletedList.length"
-              class="flex bg-white shadow-md p-1 rounded-md flex-wrap"
-            >
-              <span
-                v-for="(coin, idx) in autocompletedList"
-                :key="coin?.Id || idx"
-                @click="selectFromAutoComplete(coin.Symbol)"
-                class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-              >
-                {{ coin.Symbol }}
-              </span>
-            </div>
-            <div
-              v-if="tickersContainNewTicker"
-              class="text-sm text-red-600 mt-1"
-            >
-              This ticker already added
-            </div>
-          </div>
-          <button
-            @click="add"
-            type="button"
-            class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-          >
-            <!-- Heroicon name: solid/mail -->
-            <svg
-              class="-ml-0.5 mr-2 h-6 w-6"
-              xmlns="http://www.w3.org/2000/svg"
-              width="30"
-              height="30"
-              viewBox="0 0 24 24"
-              fill="#ffffff"
-            >
-              <path
-                d="M13 7h-2v4H7v2h4v4h2v-4h4v-2h-4V7zm-1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
-              ></path>
-            </svg>
-            Add
-          </button>
-        </div>
+        <add-ticker @add-ticker="add" :coinlist="coinlist" :tickers="tickers" />
         <div>
           <div class="max-w-xs">
             <label for="wallet" class="block text-sm font-medium text-gray-700"
@@ -140,7 +83,7 @@
               </dt>
               <div v-if="t.imageUrl" class="flex justify-center">
                 <img
-                  class="object-cover"
+                  class="object-cover rounded-full"
                   :src="`${APP_URL}${t.imageUrl}`"
                   width="100"
                   height="100"
@@ -235,12 +178,17 @@ import {
   subscribeToStatusTicker,
   unsubscribeFromStatusTicker,
 } from "./api";
+import AddTicker from "./components/add-ticker.vue";
 
 export default {
   name: "App",
+
+  components: {
+    AddTicker,
+  },
+
   data() {
     return {
-      ticker: "",
       filter: "",
 
       tickers: [],
@@ -342,28 +290,6 @@ export default {
       };
     },
 
-    filteredCoinList() {
-      if (!this.ticker) return [];
-
-      return Object.values(this.coinlist).filter(
-        (coin) =>
-          coin.FullName.toLowerCase().match(this.ticker.toLowerCase()) ||
-          coin.Symbol.toLowerCase().match(this.ticker.toLowerCase())
-      );
-    },
-
-    autocompletedList() {
-      const [first, second, third, fourth] = this.filteredCoinList;
-
-      return [first, second, third, fourth].filter((coin) => coin);
-    },
-
-    tickersContainNewTicker() {
-      return this.tickers.find(
-        (ticker) => ticker.name.toLowerCase() === this.ticker.toLowerCase()
-      );
-    },
-
     normalizedGraph() {
       const maxValue = Math.max(...this.graph);
       const minValue = Math.min(...this.graph);
@@ -413,10 +339,8 @@ export default {
         });
     },
 
-    add() {
-      if (this.tickersContainNewTicker) return;
-
-      const thisTickerUpperCase = this.ticker.toUpperCase();
+    add(tickerName) {
+      const thisTickerUpperCase = tickerName.toUpperCase();
 
       const infoAboutNewCoinFromCoinList = this.coinlist[thisTickerUpperCase];
 
@@ -432,7 +356,6 @@ export default {
 
       this.tickers = [...this.tickers, currentTicker];
       this.filter = "";
-      this.ticker = "";
 
       subscribeToTicker(currentTicker.name, (newPrice) =>
         this.updateTickers(currentTicker.name, newPrice)
@@ -440,16 +363,6 @@ export default {
       subscribeToStatusTicker(currentTicker.name, (newStatus) =>
         this.updateStatusTicker(currentTicker.name, newStatus)
       );
-    },
-
-    selectFromAutoComplete(symbol) {
-      this.ticker = symbol;
-
-      this.add();
-    },
-
-    onBlurInput() {
-      if (!this.ticker) this.autocomplete = [];
     },
 
     removeTicker(tickerToRemove) {
