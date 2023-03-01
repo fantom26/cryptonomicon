@@ -1,15 +1,18 @@
-const API_KEY =
-  "2bc6306864ca02a96fe2769ee26b09ec3e62daa99b0dbd77e65d52587d933dbc";
-
-export const tickersInfo = new Map();
 const socket = new WebSocket(
-  `wss://streamer.cryptocompare.com/v2?api_key=${API_KEY}`
+  `wss://streamer.cryptocompare.com/v2?api_key=${process.env.VUE_APP_API_KEY}`
 );
 
+const tickersHandlers = new Map();
 const AGGREGATE_INDEX = "5";
+
+const invalidSubsList = new Map();
 const INVALID_SUB = "INVALID_SUB";
+
+const pricesDependOnBTC = new Map();
+
 const BTC_SYMBOL = "BTC";
 const USD_SYMBOL = "USD";
+let BTC_PRICE = 0;
 
 socket.addEventListener("message", (e) => {
   const {
@@ -17,57 +20,61 @@ socket.addEventListener("message", (e) => {
     FROMSYMBOL: fromCurrency,
     TOSYMBOL: toCurrency,
     MESSAGE: message,
-    PARAMETER: parameter,
+    PARAMETER: nameSubs,
     PRICE: newPrice,
   } = JSON.parse(e.data);
 
-  // if "fromCurrency" doesn't have the pair to USD, I try to subscibe the "fromCurrency" to BTC
-  if (message === INVALID_SUB) {
-    const [toCurrency, fromCurrency] = parameter.split("~").reverse();
+  checkingInvalidSubs(message, nameSubs);
 
-    if (toCurrency !== BTC_SYMBOL) {
-      const [firstCb] = tickersInfo.get(fromCurrency).handlers;
-      subscribeToTicker(fromCurrency, firstCb, false);
-    }
-  }
+  if (type !== AGGREGATE_INDEX || newPrice === undefined) return;
 
-  // if fromCurrency = BTC, I change all prices thad depend on BTC value
-  if (fromCurrency === BTC_SYMBOL && newPrice) {
-    const tickersDependOnBTC = Object.fromEntries(
-      Array.from(tickersInfo.entries()).filter((ticker) => ticker[1].toBTC)
-    );
-
-    for (const tickerName in tickersDependOnBTC) {
-      const currencyInfo = tickersInfo.get(tickerName) ?? [];
-      currencyInfo.priceToUSD = currencyInfo.priceToBTC * newPrice; // newPrice = BTC price
-      currencyInfo.handlers.forEach((fn) =>
-        fn(toCurrency === BTC_SYMBOL, currencyInfo.priceToUSD)
-      );
-    }
-
-    return;
-  }
-
-  if (type !== AGGREGATE_INDEX || newPrice === undefined) {
-    return;
-  }
-
-  const currencyInfo = tickersInfo.get(fromCurrency) ?? [];
-
-  if (toCurrency === USD_SYMBOL) {
-    currencyInfo.priceToUSD = newPrice;
-  } else {
-    currencyInfo.priceToBTC = newPrice;
-
-    if (currencyInfo.toBTC && tickersInfo.has(BTC_SYMBOL)) {
-      currencyInfo.priceToUSD =
-        currencyInfo.priceToBTC * tickersInfo.get(BTC_SYMBOL).priceToUSD;
-    }
-  }
-  currencyInfo.handlers.forEach((fn) =>
-    fn(toCurrency === BTC_SYMBOL, newPrice)
-  );
+  addPricesList(toCurrency, fromCurrency, newPrice);
+  updateBtcPrice(fromCurrency, newPrice);
+  recalculateTIckersPrice();
+  setStatus(fromCurrency, true);
 });
+
+// InvalidSubs - currencies that don't have pairs to USD or BTC
+function checkingInvalidSubs(message, nameSubs) {
+  if (message === INVALID_SUB) {
+    const fromCurrency = nameSubs.split("~").reverse().at(1);
+    setStatus(fromCurrency, false);
+  }
+}
+
+function addPricesList(toCurrency, currency, newPrice) {
+  if (toCurrency === BTC_SYMBOL) {
+    pricesDependOnBTC.set(currency, newPrice);
+  }
+}
+
+function updateBtcPrice(fromCurrency, newPrice) {
+  if (fromCurrency === BTC_SYMBOL) BTC_PRICE = newPrice;
+}
+
+function recalculateTIckersPrice() {
+  if (BTC_PRICE === 0) subscribeToTickerOnWs(BTC_SYMBOL);
+
+  if (!pricesDependOnBTC || pricesDependOnBTC.size === 0) return;
+
+  [...pricesDependOnBTC.keys()].forEach((currency) => {
+    const currencyPrice = pricesDependOnBTC.get(currency);
+    const handlers = tickersHandlers.get(currency) ?? [];
+
+    handlers.forEach((fn) => fn(currencyPrice * BTC_PRICE));
+  });
+
+  const btcHandlers = tickersHandlers.get(BTC_SYMBOL) ?? [];
+  btcHandlers.forEach((fn) => fn(BTC_PRICE));
+}
+
+function setStatus(currency, status) {
+  const handlers = invalidSubsList.get(currency) ?? [];
+
+  handlers.forEach((fn) => {
+    fn(status);
+  });
+}
 
 function sendToWebSocket(message) {
   const stringifiedMessage = JSON.stringify(message);
@@ -86,40 +93,53 @@ function sendToWebSocket(message) {
   );
 }
 
-function subscribeToTickerOnWs(ticker, toUSD) {
+function subscribeToTickerOnWs(ticker, unit = BTC_SYMBOL) {
+  const toCurrency = ticker === BTC_SYMBOL ? USD_SYMBOL : unit;
   sendToWebSocket({
     action: "SubAdd",
-    subs: [`5~CCCAGG~${ticker}~${toUSD ? USD_SYMBOL : BTC_SYMBOL}`],
+    subs: [`5~CCCAGG~${ticker}~${toCurrency}`],
   });
 }
 
-function unsubscribeFromTickerOnWs(ticker, toUSD) {
+function unsubscribeFromTickerOnWs(ticker) {
+  if (ticker === BTC_SYMBOL) {
+    return;
+  }
+
   sendToWebSocket({
     action: "SubRemove",
-    subs: [`5~CCCAGG~${ticker}~${toUSD ? USD_SYMBOL : BTC_SYMBOL}`],
+    subs: [`5~CCCAGG~${ticker}~${BTC_SYMBOL}`],
   });
+
+  if (!tickersHandlers || tickersHandlers.size === 0) {
+    sendToWebSocket({
+      action: "SubRemove",
+      subs: [`5~CCCAGG~${BTC_SYMBOL}~${USD_SYMBOL}`],
+    });
+  }
 }
 
-export const subscribeToTicker = (ticker, cb, toUSD = true) => {
-  const subscribers = tickersInfo.get(ticker)?.handlers || [];
-
-  const tickerInfo = {
-    priceToUSD: null,
-    priceToBTC: null,
-    toBTC: !toUSD,
-    handlers: [...subscribers, cb],
-  };
-
-  tickersInfo.set(ticker, tickerInfo);
-  subscribeToTickerOnWs(ticker, toUSD);
+export const subscribeToTicker = (ticker, cb) => {
+  const subscribers = tickersHandlers.get(ticker) || [];
+  tickersHandlers.set(ticker, [...subscribers, cb]);
+  subscribeToTickerOnWs(ticker);
 };
 
-export const unsubscribeFromTicker = (ticker, toUSD = true) => {
-  tickersInfo.delete(ticker);
-  unsubscribeFromTickerOnWs(ticker, toUSD);
+export const unsubscribeFromTicker = (ticker) => {
+  tickersHandlers.delete(ticker);
+  unsubscribeFromTickerOnWs(ticker);
+};
+
+export const subscribeToStatusTicker = (ticker, cb) => {
+  const subscribers = invalidSubsList.get(ticker) || [];
+  invalidSubsList.set(ticker, [...subscribers, cb]);
+};
+
+export const unsubscribeFromStatusTicker = (ticker) => {
+  invalidSubsList.delete(ticker);
 };
 
 export const getCoinlist = () =>
   fetch(
-    `https://min-api.cryptocompare.com/data/all/coinlist?summary=true&api_key=${API_KEY}`
+    `https://min-api.cryptocompare.com/data/all/coinlist?summary=true&api_key=${process.env.VUE_APP_API_KEY}`
   ).then((result) => result.json());

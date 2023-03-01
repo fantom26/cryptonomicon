@@ -120,16 +120,14 @@
           </div>
         </div>
       </section>
-
-      {{ tickers }}
       <template v-if="tickers.length > 0">
         <hr class="w-full border-t border-gray-600 my-4" />
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
             :class="{
               'border-4': selectedTicker === t,
-              'bg-red-400': !+t.price,
-              'bg-white': +t.price,
+              'bg-white': t.status,
+              'bg-red-200': !t.status,
             }"
             class="overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
             v-for="t in paginatedTickers"
@@ -222,7 +220,8 @@ import {
   subscribeToTicker,
   unsubscribeFromTicker,
   getCoinlist,
-  tickersInfo,
+  subscribeToStatusTicker,
+  unsubscribeFromStatusTicker,
 } from "./api";
 
 export default {
@@ -263,19 +262,17 @@ export default {
       this.tickers = JSON.parse(localStorageData);
 
       this.tickers.forEach((ticker) => {
-        subscribeToTicker(ticker.name, (dependOnBTC, newPrice) => {
-          this.updateTickers(ticker.name, dependOnBTC, newPrice);
+        subscribeToTicker(ticker.name, (newPrice) =>
+          this.updateTickers(ticker.name, newPrice)
+        );
+      });
 
-          if (!tickersInfo.has("BTC")) {
-            subscribeToTicker("BTC", (dependOnBTC, newPrice) => {
-              this.updateTickers("BTC", dependOnBTC, newPrice);
-            });
-          }
-        });
+      this.tickers.forEach((ticker) => {
+        subscribeToStatusTicker(ticker.name, (newStatus) =>
+          this.updateStatusTicker(ticker.name, newStatus)
+        );
       });
     }
-
-    setInterval(this.updateTickers, 5000);
   },
 
   async mounted() {
@@ -365,14 +362,21 @@ export default {
       return price > 1 ? price.toFixed(2) : price.toPrecision(2);
     },
 
-    updateTickers(tickerName, dependOnBTC, price) {
+    updateStatusTicker(tickerName, newStatus) {
+      this.tickers
+        .filter((t) => t.name === tickerName)
+        .forEach((t) => {
+          t.status = newStatus;
+        });
+    },
+
+    updateTickers(tickerName, price) {
       this.tickers
         .filter((t) => t.name === tickerName)
         .forEach((t) => {
           if (t === this.selectedTicker) {
             this.graph.push(price);
           }
-          t.dependOnBTC = dependOnBTC;
           t.price = price;
         });
     },
@@ -383,19 +387,17 @@ export default {
       const currentTicker = {
         name: this.ticker.toUpperCase(),
         price: "-",
-        dependOnBTC: true,
       };
 
       this.tickers = [...this.tickers, currentTicker];
       this.filter = "";
       this.ticker = "";
 
-      if (currentTicker.name === "BTC" && tickersInfo.get("BTC")) {
-        unsubscribeFromTicker(currentTicker.name);
-      }
-
-      subscribeToTicker(currentTicker.name, (dependOnBTC, newPrice) =>
-        this.updateTickers(currentTicker.name, dependOnBTC, newPrice)
+      subscribeToTicker(currentTicker.name, (newPrice) =>
+        this.updateTickers(currentTicker.name, newPrice)
+      );
+      subscribeToStatusTicker(currentTicker.name, (newStatus) =>
+        this.updateStatusTicker(currentTicker.name, newStatus)
       );
     },
 
@@ -417,6 +419,7 @@ export default {
       }
 
       unsubscribeFromTicker(tickerToRemove.name);
+      unsubscribeFromStatusTicker(tickerToRemove.name);
     },
 
     select(ticker) {
