@@ -136,8 +136,17 @@
           >
             <div class="px-4 py-5 sm:p-6 text-center">
               <dt class="text-sm font-medium text-gray-500 truncate">
-                {{ t.name }} - USD
+                {{ t.name }}
               </dt>
+              <div v-if="t.imageUrl" class="flex justify-center">
+                <img
+                  class="object-cover"
+                  :src="`${APP_URL}${t.imageUrl}`"
+                  width="100"
+                  height="100"
+                  alt="Icon"
+                />
+              </div>
               <dd class="mt-1 text-3xl font-semibold text-gray-900">
                 {{ formatPrice(t.price) }}
               </dd>
@@ -246,6 +255,8 @@ export default {
 
       limit: 6,
       page: 1,
+
+      APP_URL: "",
     };
   },
 
@@ -293,6 +304,7 @@ export default {
     } finally {
       window.addEventListener("resize", this.calculateMaxGraphElements);
       this.loading = false;
+      this.APP_URL = process.env.VUE_APP_APP_URL;
     }
   },
 
@@ -376,7 +388,7 @@ export default {
     formatPrice(price) {
       if (price === "-") return price;
 
-      return price > 1 ? price.toFixed(2) : price.toPrecision(2);
+      return price > 1 ? `${price.toFixed(2)}$` : `${price.toPrecision(2)}$`;
     },
 
     updateStatusTicker(tickerName, newStatus) {
@@ -404,10 +416,19 @@ export default {
     add() {
       if (this.tickersContainNewTicker) return;
 
+      const thisTickerUpperCase = this.ticker.toUpperCase();
+
+      const infoAboutNewCoinFromCoinList = this.coinlist[thisTickerUpperCase];
+
       const currentTicker = {
-        name: this.ticker.toUpperCase(),
+        name: thisTickerUpperCase,
         price: "-",
       };
+
+      if (infoAboutNewCoinFromCoinList) {
+        const { ImageUrl: imageUrl } = infoAboutNewCoinFromCoinList;
+        currentTicker.imageUrl = imageUrl;
+      }
 
       this.tickers = [...this.tickers, currentTicker];
       this.filter = "";
